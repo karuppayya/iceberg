@@ -19,24 +19,29 @@
 
 package org.apache.iceberg.actions;
 
-import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import org.apache.iceberg.ExpireSnapshots;
 import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableOperations;
-import org.apache.iceberg.exceptions.NotFoundException;
 import org.apache.iceberg.exceptions.ValidationException;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
+import org.apache.iceberg.spark.SparkUtil;
 import org.apache.iceberg.util.PropertyUtil;
-import org.apache.iceberg.util.Tasks;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.MapPartitionsFunction;
+import org.apache.spark.api.java.function.ReduceFunction;
+import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.functions;
@@ -205,16 +210,15 @@ public class ExpireSnapshotsAction extends BaseSparkAction<ExpireSnapshotsAction
 
       this.expiredFiles = originalFiles.except(validFiles);
     }
-
     return expiredFiles;
   }
 
   @Override
   public ExpireSnapshotsActionResult execute() {
     if (streamResults) {
-      return deleteFiles(expire().toLocalIterator());
+      return deleteFiles(expire());
     } else {
-      return deleteFiles(expire().collectAsList().iterator());
+      return deleteFiles(expire());
     }
   }
 
@@ -233,36 +237,47 @@ public class ExpireSnapshotsAction extends BaseSparkAction<ExpireSnapshotsAction
    * @param expired an Iterator of Spark Rows of the structure (path: String, type: String)
    * @return Statistics on which files were deleted
    */
-  private ExpireSnapshotsActionResult deleteFiles(Iterator<Row> expired) {
-    AtomicLong dataFileCount = new AtomicLong(0L);
-    AtomicLong manifestCount = new AtomicLong(0L);
-    AtomicLong manifestListCount = new AtomicLong(0L);
+  private ExpireSnapshotsActionResult deleteFiles(Dataset<Row> expired) {
+    JavaSparkContext context = new JavaSparkContext(spark.sparkContext());
+    Broadcast<FileIO> ioBroadcast = context.broadcast(SparkUtil.serializableFileIO(table()));
+    MapPartitionsFunction<Row, ExpireSnapshotsActionResult> mapPartitionsFunction =
+        (MapPartitionsFunction<Row, ExpireSnapshotsActionResult>) rows -> {
+          long dataFileCount = 0L;
+          long manifestCount = 0L;
+          long manifestListCount = 0L;
 
-    Tasks.foreach(expired)
-        .retry(3).stopRetryOn(NotFoundException.class).suppressFailureWhenFinished()
-        .executeWith(deleteExecutorService)
-        .onFailure((fileInfo, exc) ->
-            LOG.warn("Delete failed for {}: {}", fileInfo.getString(1), fileInfo.getString(0), exc))
-        .run(fileInfo -> {
-          String file = fileInfo.getString(0);
-          String type = fileInfo.getString(1);
-          deleteFunc.accept(file);
-          switch (type) {
-            case DATA_FILE:
-              dataFileCount.incrementAndGet();
-              LOG.trace("Deleted Data File: {}", file);
-              break;
-            case MANIFEST:
-              manifestCount.incrementAndGet();
-              LOG.debug("Deleted Manifest: {}", file);
-              break;
-            case MANIFEST_LIST:
-              manifestListCount.incrementAndGet();
-              LOG.debug("Deleted Manifest List: {}", file);
-              break;
+          FileIO io = ioBroadcast.getValue();
+          while (rows.hasNext()) {
+            Row row = rows.next();
+            String file = row.getString(0);
+            String type = row.getString(1);
+            io.deleteFile(file);
+            switch (type) {
+              case DATA_FILE:
+                dataFileCount++;
+                LOG.trace("Deleted Data File: {}", file);
+                break;
+              case MANIFEST:
+                manifestCount++;
+                LOG.debug("Deleted Manifest: {}", file);
+                break;
+              case MANIFEST_LIST:
+                manifestListCount++;
+                LOG.debug("Deleted Manifest List: {}", file);
+                break;
+            }
           }
-        });
-    LOG.info("Deleted {} total files", dataFileCount.get() + manifestCount.get() + manifestListCount.get());
-    return new ExpireSnapshotsActionResult(dataFileCount.get(), manifestCount.get(), manifestListCount.get());
+          List<ExpireSnapshotsActionResult> manifests = Lists.newArrayList();
+          manifests.add(new ExpireSnapshotsActionResult(dataFileCount, manifestCount, manifestListCount));
+          return manifests.iterator();
+        };
+    ExpireSnapshotsActionResult result = expired
+        .mapPartitions(mapPartitionsFunction, Encoders.javaSerialization(ExpireSnapshotsActionResult.class))
+        .reduce((ReduceFunction<ExpireSnapshotsActionResult>) (res1, res2) ->
+            new ExpireSnapshotsActionResult(res1.dataFilesDeleted() + res2.dataFilesDeleted(),
+                res1.manifestFilesDeleted() + res2.manifestFilesDeleted(),
+                res1.manifestListsDeleted() + res2.manifestListsDeleted()));
+
+    return result;
   }
 }
