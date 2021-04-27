@@ -14,5 +14,64 @@
 
 package org.apache.iceberg.spark;
 
-public class TestHiveTableNameIdentifiers3 extends TestHiveTableIdentifiers {
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
+import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.types.Types;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.junit.Before;
+import org.junit.Test;
+
+import static org.apache.iceberg.types.Types.NestedField.optional;
+
+public class TestHiveTableNameIdentifiers3 extends SparkTestBase {
+  @Before
+  public void initialize() {
+    spark.conf().set("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkSessionCatalog");
+    spark.conf().set("spark.sql.catalog.spark_catalog.type", "hive");
+  }
+
+  @Test
+  public void testHiveTableCreationWithInvalidTopLevelColumnName() {
+    TableIdentifier tableIdentifier = TableIdentifier.of("default", "t");
+    final Schema SCHEMA = new Schema(
+        optional(1, "key", Types.StructType.of(
+            optional(2, "x", Types.StringType.get()),
+            optional(3, "yi", Types.DoubleType.get())
+
+        )),
+        optional(4, "value,a", Types.StringType.get()),
+        optional(5, "p", Types.StringType.get())
+    );
+
+    // top level column with comma
+    catalog.createTable(tableIdentifier, SCHEMA, PartitionSpec.unpartitioned());
+    Dataset<Row> resultDf = spark.read()
+        .format("iceberg")
+        .load(tableIdentifier.toString());
+    resultDf.collectAsList();
+    sql("select * from t");
+  }
+
+  @Test
+  public void testHiveTableCreationWithInvalidNestedColumnName() {
+    // Nested column with comma
+    TableIdentifier tableIdentifier = TableIdentifier.of("default", "t1");
+    final Schema SCHEMA = new Schema(
+        optional(1, "key", Types.StructType.of(
+            optional(2, "x", Types.StringType.get()),
+            optional(3, "y,i", Types.DoubleType.get())
+        )),
+        optional(4, "value_a", Types.StringType.get()),
+        optional(5, "p", Types.StringType.get())
+    );
+
+    catalog.createTable(tableIdentifier, SCHEMA, PartitionSpec.unpartitioned());
+    Dataset<Row> resultDf = spark.read()
+        .format("iceberg")
+        .load(tableIdentifier.toString());
+    resultDf.collectAsList();
+    sql("select * from t");
+  }
 }
