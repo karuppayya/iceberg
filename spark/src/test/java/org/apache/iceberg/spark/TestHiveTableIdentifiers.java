@@ -14,8 +14,16 @@
 
 package org.apache.iceberg.spark;
 
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
+import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.types.Types;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
 import org.junit.Before;
 import org.junit.Test;
+
+import static org.apache.iceberg.types.Types.NestedField.optional;
 
 abstract class TestHiveTableIdentifiers extends SparkTestBase {
 
@@ -27,12 +35,28 @@ abstract class TestHiveTableIdentifiers extends SparkTestBase {
 
   @Test
   public void testHiveTableCreationWithInvalidTopLevelColumnName() throws Exception {
-    // top level column with comma
+
     spark.conf().set("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkSessionCatalog");
     spark.conf().set("spark.sql.catalog.spark_catalog.type", "hive");
 
-    String sql = "CREATE TABLE t (key STRUCT<x:STRING,`yi`:DOUBLE>, `value,a` STRING, `p` STRING) using iceberg";
-    sql(sql);
+    TableIdentifier tableIdentifier = TableIdentifier.of("default", "t");
+    final Schema SCHEMA = new Schema(
+        optional(1, "key", Types.StructType.of(
+            optional(2, "x", Types.StringType.get()),
+            optional(3, "yi", Types.DoubleType.get())
+
+        )),
+        optional(4, "value,a", Types.StringType.get()),
+        optional(5, "p", Types.StringType.get())
+    );
+
+    // top level column with comma
+    catalog.createTable(tableIdentifier, SCHEMA, PartitionSpec.unpartitioned());
+
+    Dataset<Row> resultDf = spark.read()
+        .format("iceberg")
+        .load(tableIdentifier.toString());
+    resultDf.collectAsList();
   }
 
   @Test
@@ -41,7 +65,20 @@ abstract class TestHiveTableIdentifiers extends SparkTestBase {
     spark.conf().set("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkSessionCatalog");
     spark.conf().set("spark.sql.catalog.spark_catalog.type", "hive");
 
-    String sql = "CREATE TABLE t1 (key STRUCT<x:STRING,`y,i`:DOUBLE>, `value_a` STRING, `p` STRING) using iceberg\n";
-    sql(sql);
+    TableIdentifier tableIdentifier = TableIdentifier.of("default", "t1");
+    final Schema SCHEMA = new Schema(
+        optional(1, "key", Types.StructType.of(
+            optional(2, "x", Types.StringType.get()),
+            optional(3, "y,i", Types.DoubleType.get())
+        )),
+        optional(4, "value_a", Types.StringType.get()),
+        optional(5, "p", Types.StringType.get())
+    );
+
+    catalog.createTable(tableIdentifier, SCHEMA, PartitionSpec.unpartitioned());
+    Dataset<Row> resultDf = spark.read()
+        .format("iceberg")
+        .load(tableIdentifier.toString());
+    resultDf.collectAsList();
   }
 }
