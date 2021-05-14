@@ -35,7 +35,7 @@ public class TestHiveTableNameIdentifiers3 extends SparkTestBase {
   @Test
   public void testHiveTableCreationWithInvalidTopLevelColumnName() {
     TableIdentifier tableIdentifier = TableIdentifier.of("default", "t");
-    final Schema SCHEMA = new Schema(
+    final Schema schema = new Schema(
         optional(1, "key", Types.StructType.of(
             optional(2, "x", Types.StringType.get()),
             optional(3, "yi", Types.DoubleType.get())
@@ -46,7 +46,7 @@ public class TestHiveTableNameIdentifiers3 extends SparkTestBase {
     );
 
     // top level column with comma
-    catalog.createTable(tableIdentifier, SCHEMA, PartitionSpec.unpartitioned());
+    catalog.createTable(tableIdentifier, schema, PartitionSpec.unpartitioned());
     Dataset<Row> resultDf = spark.read()
         .format("iceberg")
         .load(tableIdentifier.toString());
@@ -58,7 +58,7 @@ public class TestHiveTableNameIdentifiers3 extends SparkTestBase {
   public void testHiveTableCreationWithInvalidNestedColumnName() {
     // Nested column with comma
     TableIdentifier tableIdentifier = TableIdentifier.of("default", "t1");
-    final Schema SCHEMA = new Schema(
+    final Schema schema = new Schema(
         optional(1, "key", Types.StructType.of(
             optional(2, "x", Types.StringType.get()),
             optional(3, "y,i", Types.DoubleType.get())
@@ -67,7 +67,7 @@ public class TestHiveTableNameIdentifiers3 extends SparkTestBase {
         optional(5, "p", Types.StringType.get())
     );
 
-    catalog.createTable(tableIdentifier, SCHEMA, PartitionSpec.unpartitioned());
+    catalog.createTable(tableIdentifier, schema, PartitionSpec.unpartitioned());
     Dataset<Row> resultDf = spark.read()
         .format("iceberg")
         .load(tableIdentifier.toString());

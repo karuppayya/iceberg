@@ -17,9 +17,10 @@
  * under the License.
  */
 
-package org.apache.iceberg.spark.source;
+
+package org.apache.iceberg.spark;
 
 import org.apache.iceberg.TestHiveTableNameIdentifiers;
 
-public class TestIcebergSourceHiveTables3 extends TestHiveTableNameIdentifiers {
+public class TestHiveTableNameIdentifiers24 extends TestHiveTableNameIdentifiers {
 }
