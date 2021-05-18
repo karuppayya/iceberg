@@ -52,7 +52,6 @@ public abstract class TestHiveTableNameIdentifiers extends SparkTestBase {
     spark.conf().set("spark.sql.catalog.spark_catalog.type", "hive");
     this.tableDir = temp.newFolder();
     this.tableLocation = tableDir.toURI().toString();
-    System.out.println("a");
   }
 
   @Test
@@ -99,17 +98,18 @@ public abstract class TestHiveTableNameIdentifiers extends SparkTestBase {
   @Test
   public void testHivePartitionedTableCreationWithInvalidPartitionedColumnName() {
     TableIdentifier tableIdentifier = TableIdentifier.of("default", "t3");
+    String invalidPartColName = "value,a";
     final Schema schema = new Schema(
         optional(1, "c1", Types.IntegerType.get()),
         optional(2, "c2", Types.StringType.get()),
-        optional(3, "value,a", Types.StringType.get())
+        optional(3, invalidPartColName, Types.StringType.get())
     );
 
     // Partition column name with comma
     catalog.createTable(tableIdentifier, schema,
-        PartitionSpec.builderFor(schema).identity("value,a").build(), tableLocation, Maps.newHashMap());
+        PartitionSpec.builderFor(schema).identity(invalidPartColName).build(), tableLocation, Maps.newHashMap());
 
-    appendData(tableIdentifier, "AAAA");
+    appendRecord(tableIdentifier, invalidPartColName, "AAAA", "append");
 
     Dataset<Row> resultDf = spark.read()
         .format("iceberg")
@@ -120,29 +120,24 @@ public abstract class TestHiveTableNameIdentifiers extends SparkTestBase {
   @Test
   public void testExpireSanpshotsWithHivePartitionedTable() {
     TableIdentifier tableIdentifier = TableIdentifier.of("default", "t4");
-    final Schema schema = new Schema(
+    Schema schema = new Schema(
         optional(1, "c1", Types.IntegerType.get()),
         optional(2, "c2", Types.StringType.get()),
-        optional(3, "value,a", Types.StringType.get())
+        optional(3, "c3,a", Types.StringType.get())
     );
+    String invalidPartColName = "c3,a";
+    PartitionSpec spec = PartitionSpec.builderFor(schema).identity(invalidPartColName).build();
 
     // Partition column name with comma
-    Table table = catalog.createTable(tableIdentifier, schema,
-        PartitionSpec.builderFor(schema).identity("value,a").build(), tableLocation, Maps.newHashMap());
+    Table table = catalog.createTable(tableIdentifier, schema, spec, tableLocation, Maps.newHashMap());
 
-    appendData(tableIdentifier, "AAAA");
-    appendData(tableIdentifier, "AAAB");
-    appendData(tableIdentifier, "AAAC");
-    List<Row> rows = spark.read().format("iceberg")
-        .load(tableIdentifier.toString() + ".files")
-        .selectExpr("file_path").collectAsList();
-    String filePath = rows.get(0).getString(0);
+    appendRecord(tableIdentifier, invalidPartColName, "AAAA", "append");
+    appendRecord(tableIdentifier, invalidPartColName, "BBBB", "append");
+    appendRecord(tableIdentifier, invalidPartColName, "BBBB", "overwrite");
 
-    Table tbl = catalog.loadTable(tableIdentifier);
-    tbl.newDelete().deleteFile(filePath).commit();
-    long tAfterCommits = rightAfterSnapshot(tbl);
+    long tAfterCommits = rightAfterSnapshot(table);
 
-    Actions.forTable(tbl).expireSnapshots()
+    Actions.forTable(table).expireSnapshots()
         .expireOlderThan(tAfterCommits)
         .execute();
 
@@ -152,17 +147,17 @@ public abstract class TestHiveTableNameIdentifiers extends SparkTestBase {
     resultDf.collectAsList();
   }
 
-  private void appendData(TableIdentifier tableIdentifier, String partCol) {
+  private void appendRecord(TableIdentifier tableIdentifier, String partColName, String partColValue, String mode) {
     List<ThreeColumnRecord> records = Lists.newArrayList(
-        new ThreeColumnRecord(1, "AAAAAAAAAA", partCol)
+        new ThreeColumnRecord(1, "AAAAAAAAAA", partColValue)
     );
     Dataset<Row> df = spark.createDataFrame(records, ThreeColumnRecord.class);
-    Dataset<Row> renamedDF = df.withColumnRenamed("c3", "value,a");
+    Dataset<Row> renamedDF = df.withColumnRenamed("c3", partColName);
     // normal write
-    renamedDF.select("c1", "c2", "value,a")
+    renamedDF.select("c1", "c2", partColName)
         .write()
         .format("iceberg")
-        .mode("append")
+        .mode(mode)
         .save(tableIdentifier.toString());
   }
 
