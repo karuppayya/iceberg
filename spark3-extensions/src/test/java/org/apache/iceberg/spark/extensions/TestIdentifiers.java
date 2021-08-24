@@ -119,7 +119,7 @@ public abstract class TestIdentifiers extends SparkTestBase {
         "{ \"key\": { \"x\": \"X2\", \"y" + validChar + "i\": 2.0 }," +
             " \"value" + validChar + "a\": \"A2\", \"p_p1\": \"P2\" }";
 
-    Dataset<Row> recordDF = toDS(jsonData).select("key", "value" + validChar + "a", "p_p1");
+    Dataset<Row> recordDF = toDS(jsonData).select("key", "`value" + validChar + "a`", "p_p1");
 
     recordDF.write().insertInto(tableName);
 
@@ -154,7 +154,7 @@ public abstract class TestIdentifiers extends SparkTestBase {
         "{ \"key\": { \"x\": \"X2\", \"y" + validChar + "i\": 2.0 }," +
             " \"value" + validChar + "a\": \"A2\", \"p_p1\": \"P2\" }";
 
-    Dataset<Row> recordDF = toDS(jsonData).select("key", "value" + validChar + "a", "p_p1");
+    Dataset<Row> recordDF = toDS(jsonData).select("key", "`value" + validChar + "a`", "p_p1");
 
     recordDF.write().insertInto(tableName);
 
