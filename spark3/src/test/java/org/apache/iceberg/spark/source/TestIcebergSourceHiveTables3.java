@@ -19,7 +19,5 @@
 
 package org.apache.iceberg.spark.source;
 
-import org.apache.iceberg.TestHiveTableNameIdentifiers;
-
-public class TestIcebergSourceHiveTables3 extends TestHiveTableNameIdentifiers {
+public class TestIcebergSourceHiveTables3 extends TestIcebergSourceHiveTables {
 }
