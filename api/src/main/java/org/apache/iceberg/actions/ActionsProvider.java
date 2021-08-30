@@ -41,10 +41,10 @@ public interface ActionsProvider {
   }
 
   /**
-   * Instantiates an action to remove orphan files.
+   * Instantiates an action to delete orphan files.
    */
-  default RemoveOrphanFiles removeOrphanFiles(Table table) {
-    throw new UnsupportedOperationException(this.getClass().getName() + " does not implement removeOrphanFiles");
+  default DeleteOrphanFiles deleteOrphanFiles(Table table) {
+    throw new UnsupportedOperationException(this.getClass().getName() + " does not implement deleteOrphanFiles");
   }
 
   /**
@@ -66,5 +66,12 @@ public interface ActionsProvider {
    */
   default ExpireSnapshots expireSnapshots(Table table) {
     throw new UnsupportedOperationException(this.getClass().getName() + " does not implement expireSnapshots");
+  }
+
+  /**
+   * Instantiates an action to delete all the files reachable from given metadata location.
+   */
+  default DeleteReachableFiles deleteReachableFiles(String metadataLocation) {
+    throw new UnsupportedOperationException(this.getClass().getName() + " does not implement deleteReachableFiles");
   }
 }

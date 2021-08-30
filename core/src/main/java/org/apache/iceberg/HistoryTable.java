@@ -68,13 +68,14 @@ public class HistoryTable extends BaseMetadataTable {
     TableOperations ops = operations();
     return StaticDataTask.of(
         ops.io().newInputFile(ops.current().metadataFileLocation()),
-        ops.current().snapshotLog(),
-        convertHistoryEntryFunc(table()));
+        schema(), scan.schema(), ops.current().snapshotLog(),
+        convertHistoryEntryFunc(table())
+    );
   }
 
   private class HistoryScan extends StaticTableScan {
     HistoryScan(TableOperations ops, Table table) {
-      super(ops, table, HISTORY_SCHEMA, HistoryTable.this::task);
+      super(ops, table, HISTORY_SCHEMA, HistoryTable.this.metadataTableType().name(), HistoryTable.this::task);
     }
 
     @Override

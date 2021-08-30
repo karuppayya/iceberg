@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.hadoop.fs.Path;
@@ -34,6 +35,7 @@ import org.apache.iceberg.MetadataTableType;
 import org.apache.iceberg.NullOrder;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.TableOperations;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.UpdateProperties;
 import org.apache.iceberg.UpdateSchema;
@@ -293,12 +295,18 @@ public class Spark3Util {
           }
 
           @Override
+          public Transform alwaysNull(int fieldId, String sourceName, int sourceId) {
+            // do nothing for alwaysNull, it doesn't need to be converted to a transform
+            return null;
+          }
+
+          @Override
           public Transform unknown(int fieldId, String sourceName, int sourceId, String transform) {
             return Expressions.apply(transform, Expressions.column(sourceName));
           }
         });
 
-    return transforms.toArray(new Transform[0]);
+    return transforms.stream().filter(Objects::nonNull).toArray(Transform[]::new);
   }
 
   public static Distribution buildRequiredDistribution(org.apache.iceberg.Table table) {
@@ -555,6 +563,19 @@ public class Spark3Util {
     return null;
   }
 
+  public static Boolean propertyAsBoolean(CaseInsensitiveStringMap options, String property, Boolean defaultValue) {
+    if (defaultValue != null) {
+      return options.getBoolean(property, defaultValue);
+    }
+
+    String value = options.get(property);
+    if (value != null) {
+      return Boolean.parseBoolean(value);
+    }
+
+    return null;
+  }
+
   public static class DescribeSchemaVisitor extends TypeUtil.SchemaVisitor<String> {
     private static final Joiner COMMA = Joiner.on(',');
     private static final DescribeSchemaVisitor INSTANCE = new DescribeSchemaVisitor();
@@ -579,7 +600,7 @@ public class Spark3Util {
 
     @Override
     public String list(Types.ListType list, String elementResult) {
-      return "map<" + elementResult + ">";
+      return "list<" + elementResult + ">";
     }
 
     @Override
@@ -733,6 +754,27 @@ public class Spark3Util {
     }
     // Could not find table
     return null;
+  }
+
+  /**
+   * Returns an Iceberg Table by its name from a Spark V2 Catalog. If cache is enabled in {@link SparkCatalog},
+   * the {@link TableOperations} of the table may be stale, please refresh the table to get the latest one.
+   *
+   * @param spark SparkSession used for looking up catalog references and tables
+   * @param name  The multipart identifier of the Iceberg table
+   * @return an Iceberg table
+   */
+  public static org.apache.iceberg.Table loadIcebergTable(SparkSession spark, String name)
+      throws ParseException, NoSuchTableException {
+    CatalogAndIdentifier catalogAndIdentifier = catalogAndIdentifier(spark, name);
+
+    CatalogPlugin catalog = catalogAndIdentifier.catalog;
+    Preconditions.checkArgument(catalog instanceof BaseCatalog, "Catalog %s(%s) is not an Iceberg Catalog",
+        catalog.name(), catalog.getClass().toString());
+    BaseCatalog baseCatalog = (BaseCatalog) catalogAndIdentifier.catalog;
+
+    Table sparkTable = baseCatalog.loadTable(catalogAndIdentifier.identifier);
+    return toIcebergTable(sparkTable);
   }
 
   public static CatalogAndIdentifier catalogAndIdentifier(SparkSession spark, String name) throws ParseException {

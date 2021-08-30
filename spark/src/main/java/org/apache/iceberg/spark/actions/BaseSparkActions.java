@@ -21,8 +21,9 @@ package org.apache.iceberg.spark.actions;
 
 import org.apache.iceberg.Table;
 import org.apache.iceberg.actions.ActionsProvider;
+import org.apache.iceberg.actions.DeleteOrphanFiles;
+import org.apache.iceberg.actions.DeleteReachableFiles;
 import org.apache.iceberg.actions.ExpireSnapshots;
-import org.apache.iceberg.actions.RemoveOrphanFiles;
 import org.apache.iceberg.actions.RewriteManifests;
 import org.apache.spark.sql.SparkSession;
 
@@ -39,8 +40,8 @@ abstract class BaseSparkActions implements ActionsProvider {
   }
 
   @Override
-  public RemoveOrphanFiles removeOrphanFiles(Table table) {
-    return new BaseRemoveOrphanFilesSparkAction(spark, table);
+  public DeleteOrphanFiles deleteOrphanFiles(Table table) {
+    return new BaseDeleteOrphanFilesSparkAction(spark, table);
   }
 
   @Override
@@ -51,5 +52,10 @@ abstract class BaseSparkActions implements ActionsProvider {
   @Override
   public ExpireSnapshots expireSnapshots(Table table) {
     return new BaseExpireSnapshotsSparkAction(spark, table);
+  }
+
+  @Override
+  public DeleteReachableFiles deleteReachableFiles(String metadataLocation) {
+    return new BaseDeleteReachableFilesSparkAction(spark, metadataLocation);
   }
 }

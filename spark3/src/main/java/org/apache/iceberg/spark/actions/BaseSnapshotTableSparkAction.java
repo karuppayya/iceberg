@@ -109,7 +109,8 @@ public class BaseSnapshotTableSparkAction
 
   @Override
   public SnapshotTable.Result execute() {
-    JobGroupInfo info = newJobGroupInfo("SNAPSHOT-TABLE", "SNAPSHOT-TABLE");
+    String desc = String.format("Snapshotting table %s as %s", sourceTableIdent(), destTableIdent);
+    JobGroupInfo info = newJobGroupInfo("SNAPSHOT-TABLE", desc);
     return withJobGroupInfo(info, this::doExecute);
   }
 
@@ -166,7 +167,7 @@ public class BaseSnapshotTableSparkAction
     // remove any possible location properties from origin properties
     properties.remove(LOCATION);
     properties.remove(TableProperties.WRITE_METADATA_LOCATION);
-    properties.remove(TableProperties.WRITE_NEW_DATA_LOCATION);
+    properties.remove(TableProperties.WRITE_FOLDER_STORAGE_LOCATION);
 
     // set default and user-provided props
     properties.put(TableCatalog.PROP_PROVIDER, "iceberg");

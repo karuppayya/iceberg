@@ -56,16 +56,17 @@ public class TestManifestListVersions {
   private static final int DELETED_FILES = 1;
   private static final long DELETED_ROWS = 22910L;
   private static final List<ManifestFile.PartitionFieldSummary> PARTITION_SUMMARIES = ImmutableList.of();
+  private static final ByteBuffer KEY_METADATA = null;
 
   private static final ManifestFile TEST_MANIFEST = new GenericManifestFile(
       PATH, LENGTH, SPEC_ID, ManifestContent.DATA, SEQ_NUM, MIN_SEQ_NUM, SNAPSHOT_ID,
       ADDED_FILES, ADDED_ROWS, EXISTING_FILES, EXISTING_ROWS, DELETED_FILES, DELETED_ROWS,
-      PARTITION_SUMMARIES);
+      PARTITION_SUMMARIES, KEY_METADATA);
 
   private static final ManifestFile TEST_DELETE_MANIFEST = new GenericManifestFile(
       PATH, LENGTH, SPEC_ID, ManifestContent.DELETES, SEQ_NUM, MIN_SEQ_NUM, SNAPSHOT_ID,
       ADDED_FILES, ADDED_ROWS, EXISTING_FILES, EXISTING_ROWS, DELETED_FILES, DELETED_ROWS,
-      PARTITION_SUMMARIES);
+      PARTITION_SUMMARIES, KEY_METADATA);
 
   @Rule
   public TemporaryFolder temp = new TemporaryFolder();
@@ -135,9 +136,9 @@ public class TestManifestListVersions {
     Assert.assertEquals("Added rows count", ADDED_ROWS, (long) generic.get("added_rows_count"));
     Assert.assertEquals("Existing rows count", EXISTING_ROWS, (long) generic.get("existing_rows_count"));
     Assert.assertEquals("Deleted rows count", DELETED_ROWS, (long) generic.get("deleted_rows_count"));
-    Assert.assertNull("Content", generic.get(ManifestFile.MANIFEST_CONTENT.name()));
-    Assert.assertNull("Sequence number", generic.get(ManifestFile.SEQUENCE_NUMBER.name()));
-    Assert.assertNull("Min sequence number", generic.get(ManifestFile.MIN_SEQUENCE_NUMBER.name()));
+    AssertHelpers.assertEmptyAvroField(generic, ManifestFile.MANIFEST_CONTENT.name());
+    AssertHelpers.assertEmptyAvroField(generic, ManifestFile.SEQUENCE_NUMBER.name());
+    AssertHelpers.assertEmptyAvroField(generic, ManifestFile.MIN_SEQUENCE_NUMBER.name());
   }
 
   @Test
@@ -157,9 +158,9 @@ public class TestManifestListVersions {
     Assert.assertEquals("Added rows count", ADDED_ROWS, (long) generic.get("added_rows_count"));
     Assert.assertEquals("Existing rows count", EXISTING_ROWS, (long) generic.get("existing_rows_count"));
     Assert.assertEquals("Deleted rows count", DELETED_ROWS, (long) generic.get("deleted_rows_count"));
-    Assert.assertNull("Content", generic.get(ManifestFile.MANIFEST_CONTENT.name()));
-    Assert.assertNull("Sequence number", generic.get(ManifestFile.SEQUENCE_NUMBER.name()));
-    Assert.assertNull("Min sequence number", generic.get(ManifestFile.MIN_SEQUENCE_NUMBER.name()));
+    AssertHelpers.assertEmptyAvroField(generic, ManifestFile.MANIFEST_CONTENT.name());
+    AssertHelpers.assertEmptyAvroField(generic, ManifestFile.SEQUENCE_NUMBER.name());
+    AssertHelpers.assertEmptyAvroField(generic, ManifestFile.MIN_SEQUENCE_NUMBER.name());
   }
 
   @Test
@@ -223,7 +224,7 @@ public class TestManifestListVersions {
     ManifestFile manifest = new GenericManifestFile(
         PATH, LENGTH, SPEC_ID, ManifestContent.DATA, SEQ_NUM, MIN_SEQ_NUM, SNAPSHOT_ID,
         ADDED_FILES, ADDED_ROWS, EXISTING_FILES, EXISTING_ROWS, DELETED_FILES, DELETED_ROWS,
-        partitionFieldSummaries);
+        partitionFieldSummaries, KEY_METADATA);
 
     InputFile manifestList = writeManifestList(manifest, 2);
 

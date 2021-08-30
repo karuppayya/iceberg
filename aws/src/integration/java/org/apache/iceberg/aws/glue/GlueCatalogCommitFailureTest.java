@@ -76,14 +76,12 @@ public class GlueCatalogCommitFailureTest extends GlueTestBase {
     GlueTableOperations spyOps = Mockito.spy(ops);
     failCommitAndThrowException(spyOps, ConcurrentModificationException.builder().build());
 
-    try {
-      spyOps.commit(metadataV2, metadataV1);
-    } catch (CommitFailedException e) {
-      Assert.assertTrue("Exception message should mention concurrent exception",
-          e.getMessage().contains("Glue detected concurrent update"));
-      Assert.assertTrue("Cause should be concurrent modification exception",
-          e.getCause() instanceof ConcurrentModificationException);
-    }
+    AssertHelpers.assertThrowsWithCause("GlueCatalog should fail on concurrent modifications",
+        CommitFailedException.class,
+        "Glue detected concurrent update",
+        ConcurrentModificationException.class,
+        null,
+        () -> spyOps.commit(metadataV2, metadataV1));
     Mockito.verify(spyOps, Mockito.times(0)).refresh();
 
     ops.refresh();

@@ -22,6 +22,7 @@ package org.apache.iceberg.flink;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -29,10 +30,12 @@ import java.util.stream.StreamSupport;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.api.constraints.UniqueConstraint;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.iceberg.AssertHelpers;
+import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.ContentFile;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
@@ -42,12 +45,16 @@ import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.TableOperations;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.NoSuchTableException;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
+import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.types.Types;
 import org.junit.After;
 import org.junit.Assert;
@@ -119,6 +126,40 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
     CatalogTable catalogTable = catalogTable("tl");
     Assert.assertEquals(TableSchema.builder().field("id", DataTypes.BIGINT()).build(), catalogTable.getSchema());
     Assert.assertEquals(Maps.newHashMap(), catalogTable.getOptions());
+  }
+
+  @Test
+  public void testCreateTableWithPrimaryKey() throws Exception {
+    sql("CREATE TABLE tl(id BIGINT, data STRING, key STRING PRIMARY KEY NOT ENFORCED)");
+
+    Table table = table("tl");
+    Assert.assertEquals("Should have the expected row key.",
+        Sets.newHashSet(table.schema().findField("key").fieldId()),
+        table.schema().identifierFieldIds());
+
+    CatalogTable catalogTable = catalogTable("tl");
+    Optional<UniqueConstraint> uniqueConstraintOptional = catalogTable.getSchema().getPrimaryKey();
+    Assert.assertTrue("Should have the expected unique constraint", uniqueConstraintOptional.isPresent());
+    Assert.assertEquals("Should have the expected columns",
+        ImmutableList.of("key"), uniqueConstraintOptional.get().getColumns());
+  }
+
+  @Test
+  public void testCreateTableWithMultiColumnsInPrimaryKey() throws Exception {
+    sql("CREATE TABLE tl(id BIGINT, data STRING, CONSTRAINT pk_constraint PRIMARY KEY(data, id) NOT ENFORCED)");
+
+    Table table = table("tl");
+    Assert.assertEquals("Should have the expected RowKey",
+        Sets.newHashSet(
+            table.schema().findField("id").fieldId(),
+            table.schema().findField("data").fieldId()),
+        table.schema().identifierFieldIds());
+
+    CatalogTable catalogTable = catalogTable("tl");
+    Optional<UniqueConstraint> uniqueConstraintOptional = catalogTable.getSchema().getPrimaryKey();
+    Assert.assertTrue("Should have the expected unique constraint", uniqueConstraintOptional.isPresent());
+    Assert.assertEquals("Should have the expected columns",
+        ImmutableSet.of("data", "id"), ImmutableSet.copyOf(uniqueConstraintOptional.get().getColumns()));
   }
 
   @Test
@@ -198,6 +239,44 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
         catalogTable.getSchema());
     Assert.assertEquals(Maps.newHashMap(), catalogTable.getOptions());
     Assert.assertEquals(Collections.singletonList("dt"), catalogTable.getPartitionKeys());
+  }
+
+  @Test
+  public void testCreateTableWithFormatV2ThroughTableProperty() throws Exception {
+    sql("CREATE TABLE tl(id BIGINT) WITH ('format-version'='2')");
+
+    Table table = table("tl");
+    Assert.assertEquals("should create table using format v2",
+        2, ((BaseTable) table).operations().current().formatVersion());
+  }
+
+  @Test
+  public void testUpgradeTableWithFormatV2ThroughTableProperty() throws Exception {
+    sql("CREATE TABLE tl(id BIGINT) WITH ('format-version'='1')");
+
+    Table table = table("tl");
+    TableOperations ops = ((BaseTable) table).operations();
+    Assert.assertEquals("should create table using format v1",
+        1, ops.refresh().formatVersion());
+
+    sql("ALTER TABLE tl SET('format-version'='2')");
+    Assert.assertEquals("should update table to use format v2",
+        2, ops.refresh().formatVersion());
+  }
+
+  @Test
+  public void testDowngradeTableToFormatV1ThroughTablePropertyFails() throws Exception {
+    sql("CREATE TABLE tl(id BIGINT) WITH ('format-version'='2')");
+
+    Table table = table("tl");
+    TableOperations ops = ((BaseTable) table).operations();
+    Assert.assertEquals("should create table using format v2",
+        2, ops.refresh().formatVersion());
+
+    AssertHelpers.assertThrowsCause("should fail to downgrade to v1",
+        IllegalArgumentException.class,
+        "Cannot downgrade v2 table to v1",
+        () -> sql("ALTER TABLE tl SET('format-version'='1')"));
   }
 
   @Test

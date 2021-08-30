@@ -20,8 +20,10 @@
 package org.apache.iceberg.parquet;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 import org.apache.avro.Conversion;
 import org.apache.avro.Conversions;
 import org.apache.avro.LogicalType;
@@ -30,8 +32,10 @@ import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.specific.SpecificData;
+import org.apache.commons.math3.util.Pair;
 import org.apache.iceberg.avro.AvroSchemaVisitor;
 import org.apache.iceberg.avro.UUIDConversion;
+import org.apache.iceberg.relocated.com.google.common.base.Objects;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.types.TypeUtil;
@@ -48,8 +52,8 @@ class ParquetAvro {
   static class ParquetDecimal extends LogicalType {
     private static final String NAME = "parquet-decimal";
 
-    private int precision;
-    private int scale;
+    private final int precision;
+    private final int scale;
 
     ParquetDecimal(int precision, int scale) {
       super(NAME);
@@ -154,12 +158,10 @@ class ParquetAvro {
   }
 
   private static class FixedDecimalConversion extends Conversions.DecimalConversion {
-    private final LogicalType[] decimalsByScale = new LogicalType[39];
+    private final WeakHashMap<Pair<Integer, Integer>, LogicalType> decimalsByScale;
 
     private FixedDecimalConversion() {
-      for (int i = 0; i < decimalsByScale.length; i += 1) {
-        decimalsByScale[i] = LogicalTypes.decimal(i, i);
-      }
+      this.decimalsByScale = new WeakHashMap<>();
     }
 
     @Override
@@ -169,12 +171,16 @@ class ParquetAvro {
 
     @Override
     public BigDecimal fromFixed(GenericFixed value, Schema schema, LogicalType type) {
-      return super.fromFixed(value, schema, decimalsByScale[((ParquetDecimal) type).scale()]);
+      ParquetDecimal dec = (ParquetDecimal) type;
+      return new BigDecimal(new BigInteger(value.bytes()), dec.scale());
     }
 
     @Override
     public GenericFixed toFixed(BigDecimal value, Schema schema, LogicalType type) {
-      return super.toFixed(value, schema, decimalsByScale[((ParquetDecimal) type).scale()]);
+      ParquetDecimal dec = (ParquetDecimal) type;
+      Pair<Integer, Integer> key = new Pair<>(dec.precision(), dec.scale());
+      return super.toFixed(value, schema,
+          decimalsByScale.computeIfAbsent(key, k -> LogicalTypes.decimal(k.getFirst(), k.getSecond())));
     }
   }
 
@@ -252,7 +258,7 @@ class ParquetAvro {
 
         newFields.add(copyField(field, type));
 
-        if (field.schema() != type) {
+        if (!Objects.equal(field.schema(), type)) {
           hasChange = true;
         }
       }
@@ -274,7 +280,7 @@ class ParquetAvro {
 
     @Override
     public Schema array(Schema array, Schema element) {
-      if (array.getElementType() != element) {
+      if (!Objects.equal(array.getElementType(), element)) {
         return Schema.createArray(element);
       }
       return array;
@@ -282,7 +288,7 @@ class ParquetAvro {
 
     @Override
     public Schema map(Schema map, Schema value) {
-      if (map.getValueType() != value) {
+      if (!Objects.equal(map.getValueType(), value)) {
         return Schema.createMap(value);
       }
       return map;
@@ -318,7 +324,7 @@ class ParquetAvro {
 
       int length = types.size();
       for (int i = 0; i < length; i += 1) {
-        if (types.get(i) != replacements.get(i)) {
+        if (!Objects.equal(types.get(i), replacements.get(i))) {
           return false;
         }
       }
