@@ -80,11 +80,11 @@ public class TableMigrationUtil {
    */
   public static List<DataFile> listPartition(Map<String, String> partition, String uri, String format,
                                              PartitionSpec spec, Configuration conf, MetricsConfig metricsConfig,
-                                             NameMapping mapping, Schema schema) {
+                                             NameMapping mapping, Schema tgtSchema) {
     if (format.contains("avro")) {
       return listAvroPartition(partition, uri, spec, conf);
     } else if (format.contains("parquet")) {
-      return listParquetPartition(partition, uri, spec, conf, metricsConfig, mapping, schema);
+      return listParquetPartition(partition, uri, spec, conf, metricsConfig, mapping, tgtSchema);
     } else if (format.contains("orc")) {
       return listOrcPartition(partition, uri, spec, conf, metricsConfig, mapping);
     } else {
@@ -124,7 +124,7 @@ public class TableMigrationUtil {
 
   private static List<DataFile> listParquetPartition(Map<String, String> partitionPath, String partitionUri,
                                                      PartitionSpec spec, Configuration conf,
-                                                     MetricsConfig metricsSpec, NameMapping mapping, Schema schema) {
+                                                     MetricsConfig metricsSpec, NameMapping mapping, Schema tgtSchema) {
     try {
       Path partition = new Path(partitionUri);
       FileSystem fs = partition.getFileSystem(conf);
@@ -136,7 +136,7 @@ public class TableMigrationUtil {
             try {
               ParquetMetadata metadata = ParquetFileReader.readFooter(conf, stat);
               metrics = ParquetUtil.footerMetrics(metadata, Stream.empty(), metricsSpec, mapping);
-              if (!canImportSchema(ParquetSchemaUtil.convert(metadata.getFileMetaData().getSchema()), schema)) {
+              if (!canImportSchema(ParquetSchemaUtil.convert(metadata.getFileMetaData().getSchema()), tgtSchema)) {
                 throw new ValidationException("Mismatch in table and data schema");
               }
             } catch (IOException e) {
@@ -199,8 +199,8 @@ public class TableMigrationUtil {
    */
   public static boolean canImportSchema(Schema importSchema, Schema tableSchema) {
     // Assigning ids by name look up, required for checking compatibility
-    Schema schema = TypeUtil.assignFreshIds(importSchema, tableSchema, new AtomicInteger(1000)::incrementAndGet);
-    List<String> strings = CheckCompatibility.writeCompatibilityErrors(tableSchema, schema);
+    Schema schemaWithIds = TypeUtil.assignFreshIds(importSchema, tableSchema, new AtomicInteger(1000)::incrementAndGet);
+    List<String> strings = CheckCompatibility.writeCompatibilityErrors(tableSchema, schemaWithIds);
     return strings.isEmpty();
   }
 }
