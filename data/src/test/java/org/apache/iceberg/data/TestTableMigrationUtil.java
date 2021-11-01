@@ -95,7 +95,7 @@ public class TestTableMigrationUtil {
     );
     Assert.assertFalse(TableMigrationUtil.canImportSchema(srcSchema, tgtSchema));
 
-    // Struct with nested filed with different nullability
+    // Struct with nested field with different nullability
     srcSchema = new Schema(
         required(1, "col1", Types.LongType.get()),
         optional(2, "col2", Types.StructType.of(

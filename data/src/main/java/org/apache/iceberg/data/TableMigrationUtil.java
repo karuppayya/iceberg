@@ -55,7 +55,6 @@ public class TableMigrationUtil {
 
   private static final PathFilter HIDDEN_PATH_FILTER =
       p -> !p.getName().startsWith("_") && !p.getName().startsWith(".");
-  private static Object schema;
 
   private TableMigrationUtil() {
   }
@@ -80,11 +79,11 @@ public class TableMigrationUtil {
    */
   public static List<DataFile> listPartition(Map<String, String> partition, String uri, String format,
                                              PartitionSpec spec, Configuration conf, MetricsConfig metricsConfig,
-                                             NameMapping mapping, Schema tgtSchema) {
+                                             NameMapping mapping, Schema schema) {
     if (format.contains("avro")) {
       return listAvroPartition(partition, uri, spec, conf);
     } else if (format.contains("parquet")) {
-      return listParquetPartition(partition, uri, spec, conf, metricsConfig, mapping, tgtSchema);
+      return listParquetPartition(partition, uri, spec, conf, metricsConfig, mapping, schema);
     } else if (format.contains("orc")) {
       return listOrcPartition(partition, uri, spec, conf, metricsConfig, mapping);
     } else {
@@ -124,7 +123,7 @@ public class TableMigrationUtil {
 
   private static List<DataFile> listParquetPartition(Map<String, String> partitionPath, String partitionUri,
                                                      PartitionSpec spec, Configuration conf,
-                                                     MetricsConfig metricsSpec, NameMapping mapping, Schema tgtSchema) {
+                                                     MetricsConfig metricsSpec, NameMapping mapping, Schema schema) {
     try {
       Path partition = new Path(partitionUri);
       FileSystem fs = partition.getFileSystem(conf);
@@ -136,7 +135,7 @@ public class TableMigrationUtil {
             try {
               ParquetMetadata metadata = ParquetFileReader.readFooter(conf, stat);
               metrics = ParquetUtil.footerMetrics(metadata, Stream.empty(), metricsSpec, mapping);
-              if (!canImportSchema(ParquetSchemaUtil.convert(metadata.getFileMetaData().getSchema()), tgtSchema)) {
+              if (!canImportSchema(ParquetSchemaUtil.convert(metadata.getFileMetaData().getSchema()), schema)) {
                 throw new ValidationException("Mismatch in table and data schema");
               }
             } catch (IOException e) {
@@ -194,7 +193,7 @@ public class TableMigrationUtil {
 
   /**
    * @param importSchema the schema of file being imported
-   * @param tableSchema schema of the table to which file is imported
+   * @param tableSchema schema of the table to which file is to be imported
    * @return if the files schema is compatible with table's schema
    */
   public static boolean canImportSchema(Schema importSchema, Schema tableSchema) {
