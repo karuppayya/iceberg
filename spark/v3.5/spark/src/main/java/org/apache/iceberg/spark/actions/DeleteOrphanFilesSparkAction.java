@@ -49,6 +49,7 @@ import org.apache.iceberg.actions.ImmutableDeleteOrphanFiles;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.hadoop.HiddenPathFilter;
 import org.apache.iceberg.io.BulkDeletionFailureException;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.SupportsBulkOperations;
 import org.apache.iceberg.relocated.com.google.common.annotations.VisibleForTesting;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
@@ -60,9 +61,9 @@ import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.spark.JobGroupInfo;
 import org.apache.iceberg.util.Pair;
 import org.apache.iceberg.util.PropertyUtil;
-import org.apache.iceberg.util.Tasks;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.FlatMapFunction;
+import org.apache.spark.api.java.function.ForeachPartitionFunction;
 import org.apache.spark.api.java.function.MapPartitionsFunction;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.Column;
@@ -120,7 +121,6 @@ public class DeleteOrphanFilesSparkAction extends BaseSparkAction<DeleteOrphanFi
   private long olderThanTimestamp = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(3);
   private Dataset<Row> compareToFileList;
   private Consumer<String> deleteFunc = null;
-  private ExecutorService deleteExecutorService = null;
 
   DeleteOrphanFilesSparkAction(SparkSession spark, Table table) {
     super(spark);
@@ -243,36 +243,65 @@ public class DeleteOrphanFilesSparkAction extends BaseSparkAction<DeleteOrphanFi
     }
   }
 
-  private DeleteOrphanFiles.Result doExecute() {
+  private Result doExecute() {
     Dataset<FileURI> actualFileIdentDS = actualFileIdentDS();
     Dataset<FileURI> validFileIdentDS = validFileIdentDS();
-
-    List<String> orphanFiles =
+    Dataset<String> orphanFiles =
         findOrphanFiles(spark(), actualFileIdentDS, validFileIdentDS, prefixMismatchMode);
 
-    if (deleteFunc == null && table.io() instanceof SupportsBulkOperations) {
-      deleteFiles((SupportsBulkOperations) table.io(), orphanFiles);
-    } else {
-
-      Tasks.Builder<String> deleteTasks =
-          Tasks.foreach(orphanFiles)
-              .noRetry()
-              .executeWith(deleteExecutorService)
-              .suppressFailureWhenFinished()
-              .onFailure((file, exc) -> LOG.warn("Failed to delete file: {}", file, exc));
-
-      if (deleteFunc == null) {
-        LOG.info(
-            "Table IO {} does not support bulk operations. Using non-bulk deletes.",
-            table.io().getClass().getName());
-        deleteTasks.run(table.io()::deleteFile);
-      } else {
-        LOG.info("Custom delete function provided. Using non-bulk deletes");
-        deleteTasks.run(deleteFunc::accept);
-      }
+    // to materialize the dataframe to populate the accumulator
+    orphanFiles.count();
+    if (prefixMismatchMode == PrefixMismatchMode.ERROR && !conflicts.value().isEmpty()) {
+      throw new ValidationException(
+          "Unable to determine whether certain files are orphan. "
+              + "Metadata references files that match listed/provided files except for authority/scheme. "
+              + "Please, inspect the conflicting authorities/schemes and provide which of them are equal "
+              + "by further configuring the action via equalSchemes() and equalAuthorities() methods. "
+              + "Set the prefix mismatch mode to 'NONE' to ignore remaining locations with conflicting "
+              + "authorities/schemes or to 'DELETE' iff you are ABSOLUTELY confident that remaining conflicting "
+              + "authorities/schemes are different. It will be impossible to recover deleted files. "
+              + "Conflicting authorities/schemes: %s.",
+          conflicts.value());
     }
 
-    return ImmutableDeleteOrphanFiles.Result.builder().orphanFileLocations(orphanFiles).build();
+    if (deleteFunc == null && table.io() instanceof SupportsBulkOperations) {
+      orphanFiles.foreachPartition(
+          (ForeachPartitionFunction<String>)
+              iterator -> {
+                deleteFiles((SupportsBulkOperations) table.io(), Lists.newArrayList(iterator));
+              });
+    } else {
+      Consumer<String> consumer = deleteFileFunction();
+      orphanFiles.foreachPartition(
+          (ForeachPartitionFunction<String>)
+              iterator -> {
+                while (iterator.hasNext()) {
+                  String next = iterator.next();
+                  consumer.accept(next);
+                }
+              });
+    }
+    return results(orphanFiles);
+  }
+
+  private Consumer<String> deleteFileFunction() {
+    FileIO io = table.io();
+    if (deleteFunc == null) {
+      LOG.info(
+          "Table IO {} does not support bulk operations. Using non-bulk deletes.",
+          io.getClass().getName());
+      return io::deleteFile;
+    } else {
+      LOG.info("Custom delete function provided. Using non-bulk deletes");
+      return s -> deleteFunc.accept(s);
+    }
+  }
+
+  Result results(Dataset<String> dataset) {
+    Result result = dataset::collectAsList;
+    return ImmutableDeleteOrphanFiles.Result.builder()
+        .orphanFileLocations(result.orphanFileLocations())
+        .build();
   }
 
   private Dataset<FileURI> validFileIdentDS() {
@@ -388,7 +417,7 @@ public class DeleteOrphanFilesSparkAction extends BaseSparkAction<DeleteOrphanFi
   }
 
   @VisibleForTesting
-  static List<String> findOrphanFiles(
+  public Dataset<String> findOrphanFiles(
       SparkSession spark,
       Dataset<FileURI> actualFileIdentDS,
       Dataset<FileURI> validFileIdentDS,
@@ -399,26 +428,9 @@ public class DeleteOrphanFilesSparkAction extends BaseSparkAction<DeleteOrphanFi
 
     Column joinCond = actualFileIdentDS.col("path").equalTo(validFileIdentDS.col("path"));
 
-    List<String> orphanFiles =
-        actualFileIdentDS
-            .joinWith(validFileIdentDS, joinCond, "leftouter")
-            .mapPartitions(new FindOrphanFiles(prefixMismatchMode, conflicts), Encoders.STRING())
-            .collectAsList();
-
-    if (prefixMismatchMode == PrefixMismatchMode.ERROR && !conflicts.value().isEmpty()) {
-      throw new ValidationException(
-          "Unable to determine whether certain files are orphan. "
-              + "Metadata references files that match listed/provided files except for authority/scheme. "
-              + "Please, inspect the conflicting authorities/schemes and provide which of them are equal "
-              + "by further configuring the action via equalSchemes() and equalAuthorities() methods. "
-              + "Set the prefix mismatch mode to 'NONE' to ignore remaining locations with conflicting "
-              + "authorities/schemes or to 'DELETE' iff you are ABSOLUTELY confident that remaining conflicting "
-              + "authorities/schemes are different. It will be impossible to recover deleted files. "
-              + "Conflicting authorities/schemes: %s.",
-          conflicts.value());
-    }
-
-    return orphanFiles;
+    return actualFileIdentDS
+        .joinWith(validFileIdentDS, joinCond, "leftouter")
+        .mapPartitions(new FindOrphanFiles(prefixMismatchMode, conflicts), Encoders.STRING());
   }
 
   private static Map<String, String> flattenMap(Map<String, String> map) {
